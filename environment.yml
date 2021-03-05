@@ -1,0 +1,14 @@
+name: example-environment
+channels:
+  - conda-forge
+dependencies:
+  - python
+  - numpy
+  - matplotlib
+  - astropy
+  - scipy
+  - pip
+  - pip:
+    - cmasher
+    - EXOSIMS
+    - pandas
