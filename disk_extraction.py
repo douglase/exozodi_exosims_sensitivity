@@ -5,6 +5,7 @@ from astropy.io import fits
 import matplotlib.animation as animation
 from matplotlib.animation import FuncAnimation
 from scipy.ndimage import rotate
+from scipy.ndimage import zoom
 
 """
 
@@ -44,17 +45,17 @@ def photCorrPC(nobs,nfr,t,g):
     plt.imshow(lam_est,vmin=0)
     plt.colorbar()
     plt.show()
-    # lam_est -= deltaLam(lam_est,t,g,nfr,nobs)
-    # plt.figure()
-    # plt.title('First Photometric Correction')
-    # plt.imshow(lam_est,vmin=0)
-    # plt.colorbar()
-    # plt.show()
-    # lam_est -= deltaLam(lam_est,t,g,nfr,nobs)
-    # plt.figure()
-    # plt.title('Second Photometric Correction')
-    # plt.imshow(lam_est,vmin=0)
-    # plt.colorbar()
+    lam_est -= deltaLam(lam_est,t,g,nfr,nobs)
+    plt.figure()
+    plt.title('First Photometric Correction')
+    plt.imshow(lam_est,vmin=0)
+    plt.colorbar()
+    plt.show()
+    lam_est -= deltaLam(lam_est,t,g,nfr,nobs)
+    plt.figure()
+    plt.title('Second Photometric Correction')
+    plt.imshow(lam_est,vmin=0)
+    plt.colorbar()
     # plt.show()
     return lam_est
 
@@ -101,6 +102,8 @@ def deltaLam(lam,t,g,nfr,nobs):
     return dlam
 
 def processcube(data,ID,diskfile=None,mode=None):
+    
+    
 
     vmin = 0
     vmax = 1e3
@@ -176,64 +179,88 @@ def processcube(data,ID,diskfile=None,mode=None):
     elif ID == 18:
         mind = 14711
         mand = 14735
+        
+    x = np.linspace(-1,1,len(data[0,:,:]))
+    y = np.linspace(-1,1,len(data[0,:,:]))
+    x,y = np.meshgrid(x,y)
+    r = np.sqrt(x**2 + y**2)
+
+    maskarray = (r<=0.75) & (r>= 0.2)
 
     if diskfile is not None:
         # Add debris disks
         disk = fits.getdata(diskfile).astype(float)
 #         disk = fits.getdata('annulus_inc60_r0.4._HLC.fits').astype(float)
-
+        print('disk ',disk.shape)
         # Resample the disk to fit the HLC resolution
-        y = resample2D.resamp2D(disk,48/200)
-
+#         y = zoom(disk,48/200,order=0)
         # place disk in a 67 x 67 box
-        box = np.zeros([67,67])
-        box[int(67/2)-24:int(67/2)+24,int(67/2)-24:int(67/2)+24] = y
+        box = np.zeros([67,67,len(disk[0,0,:])])
+        box[int(67/2)-24:int(67/2)+24,int(67/2)-24:int(67/2)+24] = disk
 
         # add disk to frames
-        scalar = 4e13
+        scalar = 250/10000#4e13
 
-        plt.figure()
-        plt.imshow(scalar*box,vmin=vmin,vmax=vmax)
-        plt.title('Injecting into ID {}'.format(ID))
-        plt.colorbar()
-        plt.show()
+#         plt.figure()
+#         plt.imshow(scalar*box,vmin=vmin,vmax=vmax)
+#         plt.title('Injecting into ID {}'.format(ID))
+#         plt.colorbar()
+#         plt.show()
 
         # Add debris disk to each frame
-
-
+    
+        # First do a pseudo-frame calculation
+        nodisk = data
 
         # Case for +11
         if ID in [3,5,8,10,15,17]:
+            
             rotdisk = rotate(scalar*box,-22,reshape=False)
             rotdisk[rotdisk == np.NaN] = 1e-12
             rotdisk[rotdisk <= 0] = 1e-12
-
-            data[mind:mand,:,:] += rotdisk
+            
+            for dlen in range(mand-mind):
+                choice = np.random.randint(low=0,high=len(disk)+1)
+                data[mind+dlen,:,:] += rotdisk[:,:,choice]
 
         # Case for -11
         elif ID in [2,4,9,11,14,16]:
-            data[mind:mand,:,:] += scalar*box
+            
+            for dlen in range(mand-mind):
+                choice = np.random.randint(low=0,high=len(disk)+1)
+                data[mind+dlen,:,:] += scalar*box[:,:,choice]
 
     if ID in [2,3,4,5,8,9,10,11,14,15,16,17]:
 
         if mode == 'Photon-Counting':
 
             # Now Photon Count
-            data_t = threshold(5,100,data[mind:mand,:,:])
+            data_t = threshold(5,100,data[mind:mand,:,:]) # e- to photoelectron
             data_s = np.sum(data_t,axis=0)
-            data_c = photCorrPC(data_s,mand-mind+1,500,6000)/5
-
-
+            data_c = photCorrPC(data_s,mand-mind+1,500,6000)/1 # photoelectron/sec
+            data_c = data_c-np.mean(data_c[0:5,0:5]) # SNR/sec
+            
+            # Consider the same frames w/o disks for SNR calculation
+#             nodisk_t = threshold(5,100,nodisk[mind:mand,:,:])
+#             nodisk_s = np.sum(nodisk_t,axis=0)
+#             nodisk_c = photCorrPC(nodisk_s,mand-mind+1,500,6000)/1 # photoelectron/sec
+#             nodisk_c = nodisk_c-np.mean(nodisk_c[0:5,0:5]) # SNR/sec
+            
             # Filter invalid values for NMF
+            
             data_c[data_c <= 0] = 1e-20
             data_c[data_c == np.nan] = 1e-20
             data_c[data_c == np.inf] = 1e-20
+            
+            data_c = data_c#/np.mean(nodisk_c[maskarray])
+            
 
         elif mode == 'Analog':
 
-            data_c = data[mind:mand]/(5*6000)
+            data_c = data[mind:mand]/(1*6000) # photon/sec
             data_c -= np.mean(data_c[:,0:5,0:5])
             data_c = np.sum(data_c,axis=0)
+            data_c = data_c
 
             # Filter invalid values for NMF
             data_c[data_c <= 0] = 1e-20
@@ -253,5 +280,6 @@ def processcube(data,ID,diskfile=None,mode=None):
 
         data_c[data_c <= 0] = 1e-20
         data_c[data_c == np.nan] = 1e-20
+        
 
     return data_c
