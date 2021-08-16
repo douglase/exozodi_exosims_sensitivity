@@ -39,7 +39,7 @@ def photCorrPC(nobs,nfr,t,g):
 
     """
 
-    lam_est = -np.log(1-(nobs/nfr))*np.exp(t/g)
+    lam_est = -np.log(1-(nobs/nfr)*np.exp(t/g))
     plt.figure()
     plt.title('First Photon Counted Frame')
     plt.imshow(lam_est,vmin=0)
@@ -90,7 +90,7 @@ def deltaLam(lam,t,g,nfr,nobs):
     epsCL = (1-np.exp(lam))/lam
     func  = lam*nfr*epsThr3*epsCL - nobs
 
-    dfdlam_a = (1/(2*g**2 *(6+3*lam+lam**2)))
+    dfdlam_a = (1/(2*g**2 *(6+3*lam+lam**2)**2))
     dfdlam_b = np.exp(-t/g - lam)*nfr
     dfdlam_c = 2*g**2 *(6+3*lam+lam**2)**2 + t**2 *lam*(-12 + 3*lam +3*lam**2 + lam**3 +3*np.exp(lam)*(4+lam))
     dfdlam_d = 2*g*t*(-18 +6*lam +15*lam**2 + 6*lam**3 +lam**4 + 6*np.exp(lam)*(3+2*lam))
@@ -190,27 +190,21 @@ def processcube(data,ID,diskfile=None,mode=None):
     if diskfile is not None:
         # Add debris disks
         disk = fits.getdata(diskfile).astype(float)
-#         disk = fits.getdata('annulus_inc60_r0.4._HLC.fits').astype(float)
-        print('disk ',disk.shape)
-        # Resample the disk to fit the HLC resolution
-#         y = zoom(disk,48/200,order=0)
-        # place disk in a 67 x 67 box
+        print('disk array shape = ',disk.shape)
+    
+        # Resample the disk to fit the HLC resolution - Noisy
         box = np.zeros([67,67,len(disk[0,0,:])])
         box[int(67/2)-24:int(67/2)+24,int(67/2)-24:int(67/2)+24] = disk
 
-        # add disk to frames
+        # Noiseless
+#         box = disk
+
+        # scale to ansay of disk
         scalar = 250/10000#4e13
-
-#         plt.figure()
-#         plt.imshow(scalar*box,vmin=vmin,vmax=vmax)
-#         plt.title('Injecting into ID {}'.format(ID))
-#         plt.colorbar()
-#         plt.show()
-
-        # Add debris disk to each frame
-    
-        # First do a pseudo-frame calculation
-        nodisk = data
+#         scalar *= 2/1.85 # for face-on disk
+#         scalar *= 1/50000 # for noiseless
+#         if mode == 'Analog':
+#             scalar *= 1.5
 
         # Case for +11
         if ID in [3,5,8,10,15,17]:
@@ -240,19 +234,10 @@ def processcube(data,ID,diskfile=None,mode=None):
             data_c = photCorrPC(data_s,mand-mind+1,500,6000)/1 # photoelectron/sec
             data_c = data_c-np.mean(data_c[0:5,0:5]) # SNR/sec
             
-            # Consider the same frames w/o disks for SNR calculation
-#             nodisk_t = threshold(5,100,nodisk[mind:mand,:,:])
-#             nodisk_s = np.sum(nodisk_t,axis=0)
-#             nodisk_c = photCorrPC(nodisk_s,mand-mind+1,500,6000)/1 # photoelectron/sec
-#             nodisk_c = nodisk_c-np.mean(nodisk_c[0:5,0:5]) # SNR/sec
-            
             # Filter invalid values for NMF
-            
             data_c[data_c <= 0] = 1e-20
             data_c[data_c == np.nan] = 1e-20
             data_c[data_c == np.inf] = 1e-20
-            
-            data_c = data_c#/np.mean(nodisk_c[maskarray])
             
 
         elif mode == 'Analog':
@@ -260,7 +245,7 @@ def processcube(data,ID,diskfile=None,mode=None):
             data_c = data[mind:mand]/(1*6000) # photon/sec
             data_c -= np.mean(data_c[:,0:5,0:5])
             data_c = np.sum(data_c,axis=0)
-            data_c = data_c
+            data_c = data_c # kind of a fudge factor
 
             # Filter invalid values for NMF
             data_c[data_c <= 0] = 1e-20
