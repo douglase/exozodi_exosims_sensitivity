@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import resample2D
+#import resample2D
 from astropy.io import fits
 import matplotlib.animation as animation
 from matplotlib.animation import FuncAnimation
@@ -26,79 +26,63 @@ def threshold(factor,readnoise,frame):
 
     return frame
 
-def photCorrPC(nobs,nfr,t,g):
+def photCorrPC ( nobs, nfr, t, g ) : # Nemati (2020) Appendix
+    #     print("nfr", nfr, "t", t, "g", g)
     """
-    Photon counting to 3rd order correction, typical parameters are
-    nobs =
-    t = 5*100 e-/frame
-    g = 6000 e-/photoelectron
-    nbr = lam_br * Nfr * eth * ecl
-
-    This should return the mean expected photon rate per-pixel
-
-
+    # nobs = number of observed and counted photons.
+    #        "The number of _counts_ of an above-threshold photon, that have been summed up."
+    # nfr  = number of frames.
+    #        "The number of _frames_ across which the number of observations of above-threshold photons have occured."
+    # t    = threshold.
+    #        "The threshold of electrons that determines whether a pixel is considered to have recorded a _countable_ photon."
+    # g    = gain.
+    #        "Electro Multiplying Gain = How many electrons are mobilized by one photon, using this version of CCD pixel..."
+    #        "Therefore, how many electrons need to be counted to signify that a countable photon has occured."
+            # https://www.photometrics.com/learn/imaging-topics/on-chip-multiplication-gain
+            # "The level of EM gain can be controlled by either increasing or decreasing the voltage;
+            # the gain is exponentially proportional to the voltage. 
+            # Multiplying the signal above the read noise of the output amplifier enables ultra-low-light detection at high operation speeds. 
+            # EM gain can exceed 1000x."
     """
-
-    lam_est = -np.log(1-(nobs/nfr)*np.exp(t/g))
-    plt.figure()
-    plt.title('First Photon Counted Frame')
-    plt.imshow(lam_est,vmin=0)
-    plt.colorbar()
-    plt.show()
-    lam_est -= deltaLam(lam_est,t,g,nfr,nobs)
-    plt.figure()
-    plt.title('First Photometric Correction')
-    plt.imshow(lam_est,vmin=0)
-    plt.colorbar()
-    plt.show()
-    lam_est -= deltaLam(lam_est,t,g,nfr,nobs)
-    plt.figure()
-    plt.title('Second Photometric Correction')
-    plt.imshow(lam_est,vmin=0)
-    plt.colorbar()
-    # plt.show()
+    lam_est = -np.log ( 1 - ( nobs / nfr )   *   np.exp ( t / g ) )
+    lam_est = lam_est - deltaLam ( lam_est, t, g, nfr, nobs )
+    lam_est = lam_est - deltaLam ( lam_est, t, g, nfr, nobs )
     return lam_est
-
-def deltaLam(lam,t,g,nfr,nobs):
+    
+def deltaLam ( lam, t, g, nfr, nobs) : # Nemati 2020
     """
-
-    Parameters
-    ----------
-    lam : float
-        mean expected rate per pixel per frame from photCorrPC
-    t : float
-        threshold chosen for photon counting
-    g : float
-        EM Gain
-    nfr : float
-        number of frames
-    nobs : float
-        sum of counts across all frames after thresholding
-
-    From B. Nemati 7 Nov 2020
-
-    Returns
-    -------
-    dlam
-
+    # lam  = AKA "lam_est" in photCorrPC = mean expected rate per pixel per frame
+    #        "A value less than one, representing the expected rate that a photon will hit that pixel in that frame inside the frame's exposure time."
+    # t    = threshold [measured in electrons] chosen for photon counting
+    # g    = EM gain
+    # nfr  = number of frames.
+    # nobs = number of observed and counted photons.
     """
+    ft1 = lam**2            # frequent term #1
+    ft2 = 6 + 3 * lam + ft1 # frequent term #2
+    ft3 = 2 * g**2 * ft2    # frequent term #3 ; ft3 = 2 * g**2 * ( 6 + 3 * lam + ft1 )
+    
+    # Epsilon PC = Epsilon Photon Counting = Thresholding Efficiency
+    epsThr3 = np.exp( - t / g ) * ( t**2 * ft1 + 2 * g * t * lam * ( 3 + lam ) + ft3 ) / ft3 
 
-    epsThr_a = np.exp(-t/g)*(t**2 * lam**2 + 2*g*t*lam*(3+lam) + 2*g**2 *(6+3*lam + lam**2))
-    epsThr_b = (2*g**2 *(6+3*lam + lam**2))
-    epsThr3  = epsThr_a/epsThr_b
-
-    epsCL = (1-np.exp(lam))/lam
-    func  = lam*nfr*epsThr3*epsCL - nobs
-
-    dfdlam_a = (1/(2*g**2 *(6+3*lam+lam**2)**2))
-    dfdlam_b = np.exp(-t/g - lam)*nfr
-    dfdlam_c = 2*g**2 *(6+3*lam+lam**2)**2 + t**2 *lam*(-12 + 3*lam +3*lam**2 + lam**3 +3*np.exp(lam)*(4+lam))
-    dfdlam_d = 2*g*t*(-18 +6*lam +15*lam**2 + 6*lam**3 +lam**4 + 6*np.exp(lam)*(3+2*lam))
-
-    dfdlam   = dfdlam_a*dfdlam_b*(dfdlam_c+dfdlam_d)
-
-    dlam = func/dfdlam
-
+    # Epsilon Coincidence Loss = Coincidence Loss (Efficiency)
+    epsCL = ( 1 - np.exp ( - lam ) ) / lam
+    
+    func = lam * nfr * epsThr3 * epsCL - nobs
+    
+    # dfdlam
+    dfdlam_1tN  = np.exp ( - t / g - lam) * nfr # First term numerator
+    dfdlam_1tD  = 2 * g**2 * ft2**2             # 1t denominator ; { dfdlam_1tD  = 2 * g**2 * ( 6 + 3 * lam * ft1 )**2 } 
+    dfdlam_2ts1 = dfdlam_1tD                 # 2t, 1 summand ; { dfdlam_2ts1 = 2 * g**2 * ( 6 + 3 * lam * ft1 )**2 }
+    #dfdlam_2ts2 = t**2 * lam * ( -12 + 3 * lam + 3 * ft1 + lam**3 + 3 * np.exp ( lam ) * (4 + lam) ) # 2t, 2s
+    dfdlam_2ts2 = t**2 * lam * ( -12 + 3 * lam + 3 * ft1 + ft1*lam + 3 * np.exp ( lam ) * (4 + lam) ) # 2t, 2s
+    #dfdlam_2ts3 = 2 * g * t * ( -18 + 6 * lam + 15 * ft1 + 6 * lam**3 + lam**4 + 6 * np.exp ( lam ) * ( 3 + 2 * lam ) ) # 2t, 3s
+    dfdlam_2ts3 = 2 * g * t * ( -18 + 6 * lam + 15 * ft1 + 6 * ft1*lam + ft1**2 + 6 * np.exp ( lam ) * ( 3 + 2 * lam ) ) # 2t, 3s
+    dfdlam      = dfdlam_1tN * dfdlam_1tD * ( dfdlam_2ts1 + dfdlam_2ts2 + dfdlam_2ts3 )   
+    
+    dlam = func / dfdlam
+    
+#     print("dlam",dlam)
     return dlam
 
 def processcube(data,ID,diskfile=None,mode=None):
@@ -200,7 +184,7 @@ def processcube(data,ID,diskfile=None,mode=None):
 #         box = disk
 
         # scale to ansay of disk
-        scalar = 250/10000#4e13
+        scalar = 300/10000#4e13
 #         scalar *= 2/1.85 # for face-on disk
 #         scalar *= 1/50000 # for noiseless
 #         if mode == 'Analog':
@@ -229,10 +213,10 @@ def processcube(data,ID,diskfile=None,mode=None):
         if mode == 'Photon-Counting':
 
             # Now Photon Count
-            data_t = threshold(5,100,data[mind:mand,:,:]) # e- to photoelectron
-            data_s = np.sum(data_t,axis=0)
-            data_c = photCorrPC(data_s,mand-mind+1,500,6000)/1 # photoelectron/sec
-            data_c = data_c-np.mean(data_c[0:5,0:5]) # SNR/sec
+            data_t = threshold(5,100,data[mind:mand,:,:]) # e- to photon
+            data_s = np.sum(data_t,axis=0) # photons in an observation
+            data_c = photCorrPC(data_s,mand-mind+1,500,6000)/5 # photon/pix*s
+            data_c -= np.mean(data_c[0:5,0:5]) # photon/pix*s
             
             # Filter invalid values for NMF
             data_c[data_c <= 0] = 1e-20
@@ -241,11 +225,10 @@ def processcube(data,ID,diskfile=None,mode=None):
             
 
         elif mode == 'Analog':
-
-            data_c = data[mind:mand]/(1*6000) # photon/sec
-            data_c -= np.mean(data_c[:,0:5,0:5])
-            data_c = np.sum(data_c,axis=0)
-            data_c = data_c # kind of a fudge factor
+            
+            data_c = np.sum(data[mind:mand,:,:],axis=0)
+            data_c = data_c/(5*6000*(mand-mind))#data[mind:mand]/(1*6000) # photon/pix*sec
+            data_c -= np.mean(data_c[0:5,0:5])
 
             # Filter invalid values for NMF
             data_c[data_c <= 0] = 1e-20
@@ -260,7 +243,7 @@ def processcube(data,ID,diskfile=None,mode=None):
 
     # Case for Reference
     elif ID in [1,6,7,12,13,18]:
-        data_c = data[mind:mand]/(60*10)
+        data_c = data[mind:mand]/(60*100)
         data_c -= np.mean(data_c[:,0:5,0:5])
 
         data_c[data_c <= 0] = 1e-20
@@ -268,3 +251,5 @@ def processcube(data,ID,diskfile=None,mode=None):
         
 
     return data_c
+
+
